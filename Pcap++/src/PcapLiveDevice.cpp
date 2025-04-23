@@ -18,6 +18,7 @@
 #include <fstream>
 #include <chrono>
 #include <sstream>
+#include <utility>
 #include <vector>
 #include <array>
 #if defined(_WIN32)
@@ -73,6 +74,20 @@ static const int DEFAULT_SNAPLEN = 9000;
 
 namespace pcpp
 {
+	static internal::PcapFuncTable pcapFuncs = {
+		&pcap_create,
+		&pcap_set_snaplen
+	};
+
+	namespace internal
+	{
+		// Must match the header's extern "C" declaration
+		void setPcapFunctions(PcapFuncTable table)
+		{
+			pcapFuncs = std::move(table);
+		}
+	}
+
 	static pcap_direction_t directionTypeMap(PcapLiveDevice::PcapDirection direction)
 	{
 		switch (direction)
@@ -384,13 +399,13 @@ namespace pcpp
 			device_name += ":" + std::to_string(config.nflogGroup & 0xffff);
 		}
 
-		auto pcap = internal::PcapHandle(pcap_create(device_name.c_str(), errbuf));
+		auto pcap = internal::PcapHandle(pcapFuncs.create(device_name.c_str(), errbuf));
 		if (!pcap)
 		{
 			throw std::runtime_error("Cannot create the pcap device, error was: " + std::string(errbuf));
 		}
 
-		int ret = pcap_set_snaplen(pcap.get(), config.snapshotLength <= 0 ? DEFAULT_SNAPLEN : config.snapshotLength);
+		int ret = pcapFuncs.set_snaplen(pcap.get(), config.snapshotLength <= 0 ? DEFAULT_SNAPLEN : config.snapshotLength);
 		if (ret != 0)
 		{
 			throw std::runtime_error("Cannot set snaplan, error was: " + std::string(pcap_geterr(pcap.get())));

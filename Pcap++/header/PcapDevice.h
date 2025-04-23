@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Device.h"
+#include <functional>
 
 // forward declaration for the pcap descriptor defined in pcap.h
 struct pcap;
@@ -95,6 +96,14 @@ namespace pcpp
 		private:
 			pcap_t* m_PcapDescriptor = nullptr;
 		};
+
+		struct PcapFuncTable
+		{
+			std::function<pcap_t*(const char*, char*)> create;
+			std::function<int(pcap_t*, int)> set_snaplen;
+		};
+
+		void setPcapFunctions(PcapFuncTable table);
 	}  // namespace internal
 
 	/// @class IPcapDevice

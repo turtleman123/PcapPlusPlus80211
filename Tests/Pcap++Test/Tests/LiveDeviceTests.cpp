@@ -8,14 +8,17 @@
 #include "UdpLayer.h"
 #include "PayloadLayer.h"
 #include "Packet.h"
+#include "PcapDevice.h"
 #include "../Common/GlobalTestArgs.h"
 #include "../Common/TestUtils.h"
 #include "../Common/PcapFileNamesDef.h"
+#include "../Fakeit/fakeit.hpp"
 #include <array>
 #include <vector>
 #include <iterator>
 #include <algorithm>
 #include <cstdio>
+#include "pcap.h"
 #if defined(_WIN32)
 #	include "PcapRemoteDevice.h"
 #	include "PcapRemoteDeviceList.h"
@@ -292,14 +295,44 @@ PTF_TEST_CASE(TestPcapLiveDeviceListSearch)
 	PTF_ASSERT_NULL(liveDev);
 }  // TestPcapLiveDeviceListSearch
 
+struct PcapFuncTableMock
+{
+	virtual ~PcapFuncTableMock() = default;
+
+	virtual pcap_t* create(const char*, char*);
+	virtual int set_snaplen(pcap_t *, int);
+};
+
+pcpp::internal::PcapFuncTable createMockedPcapFuncTable(fakeit::Mock<PcapFuncTableMock>& mock) {
+	pcpp::internal::PcapFuncTable table;
+	table.create = [&mock](const char* a, char* b) {
+		return mock.get().create(a, b);
+	};
+	table.set_snaplen = [&mock](pcap_t* p, int len) {
+		return mock.get().set_snaplen(p, len);
+	};
+	return table;
+}
+
 PTF_TEST_CASE(TestPcapLiveDevice)
 {
+	fakeit::Mock<PcapFuncTableMock> mock;
+	fakeit::When(Method(mock, create)).AlwaysReturn(nullptr);
+	fakeit::When(Method(mock, set_snaplen)).Return(100);
+
+	setPcapFunctions(createMockedPcapFuncTable(mock));
+
 	pcpp::PcapLiveDevice* liveDev = nullptr;
 	pcpp::IPv4Address ipToSearch(PcapTestGlobalArgs.ipToSendReceivePackets.c_str());
 	liveDev = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp(ipToSearch);
 	PTF_ASSERT_NOT_NULL(liveDev);
 	PTF_ASSERT_GREATER_THAN(liveDev->getMtu(), 0);
-	PTF_ASSERT_TRUE(liveDev->open());
+	// PTF_ASSERT_TRUE(liveDev->open());
+	auto res = liveDev->open();
+
+	fakeit::Verify(Method(mock, create)).Twice();
+	fakeit::Verify(Method(mock, set_snaplen)).Never();
+	PTF_ASSERT_TRUE(res);
 
 	PTF_ASSERT_EQUAL(liveDev->getIPv4Address(), ipToSearch);
 	{
