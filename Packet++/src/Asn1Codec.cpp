@@ -9,8 +9,8 @@
 #include <iostream>
 #include <sstream>
 #include <cmath>
-#include <limits>
 #include <cstring>
+#include <iomanip>
 
 #if defined(_WIN32)
 #	undef max
@@ -336,6 +336,11 @@ namespace pcpp
 					newRecord = new Asn1BooleanRecord();
 					break;
 				}
+				case Asn1UniversalTagType::UTCTime:
+				{
+					newRecord = new Asn1UtcTimeRecord();
+					break;
+				}
 				case Asn1UniversalTagType::Null:
 				{
 					newRecord = new Asn1NullRecord();
@@ -572,27 +577,96 @@ namespace pcpp
 		m_IsConstructed = false;
 	}
 
-	Asn1IntegerRecord::Asn1IntegerRecord(uint32_t value) : Asn1PrimitiveRecord(Asn1UniversalTagType::Integer)
+	Asn1IntegerRecord::BigInt::BigInt(const std::string& value)
+	{
+		m_Value = initFromString(value);
+	}
+
+	Asn1IntegerRecord::BigInt::BigInt(const BigInt& other)
+	{
+		m_Value = other.m_Value;
+	}
+
+	std::string Asn1IntegerRecord::BigInt::initFromString(const std::string& value)
+	{
+		std::string valueStr = value;
+
+		// Optional 0x or 0X prefix
+		if (value.size() >= 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X'))
+		{
+			valueStr = value.substr(2);
+		}
+
+		if (valueStr.empty())
+		{
+			throw std::invalid_argument("Value is not a valid hex stream");
+		}
+
+		for (const char i : valueStr)
+		{
+			if (!std::isxdigit(i))
+			{
+				throw std::invalid_argument("Value is not a valid hex stream");
+			}
+		}
+
+		return valueStr;
+	}
+
+	Asn1IntegerRecord::BigInt& Asn1IntegerRecord::BigInt::operator=(const std::string& value)
+	{
+		m_Value = initFromString(value);
+		return *this;
+	}
+
+	size_t Asn1IntegerRecord::BigInt::size() const
+	{
+		return m_Value.size() / 2;
+	}
+
+	std::string Asn1IntegerRecord::BigInt::toString() const
+	{
+		return m_Value;
+	}
+
+	std::vector<uint8_t> Asn1IntegerRecord::BigInt::toBytes() const
+	{
+		std::string value = m_Value;
+		if (m_Value.size() % 2 != 0)
+		{
+			value.insert(0, 1, '0');
+		}
+
+		std::vector<uint8_t> result;
+		for (std::size_t i = 0; i < value.size(); i += 2)
+		{
+			std::string byteStr = value.substr(i, 2);
+			auto byte = static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16));
+			result.push_back(byte);
+		}
+
+		return result;
+	}
+
+	Asn1IntegerRecord::Asn1IntegerRecord(uint64_t value) : Asn1PrimitiveRecord(Asn1UniversalTagType::Integer)
 	{
 		m_Value = value;
 
-		if (m_Value <= std::numeric_limits<uint8_t>::max())
+		std::size_t length = 0;
+		while (value != 0)
 		{
-			m_ValueLength = sizeof(uint8_t);
+			++length;
+			value >>= 8;
 		}
-		else if (value <= std::numeric_limits<uint16_t>::max())
-		{
-			m_ValueLength = sizeof(uint16_t);
-		}
-		else if (value <= std::pow(2, 3 * 8))
-		{
-			m_ValueLength = 3;
-		}
-		else
-		{
-			m_ValueLength = sizeof(uint32_t);
-		}
+		m_ValueLength = length == 0 ? 1 : length;
 
+		m_TotalLength = m_ValueLength + 2;
+	}
+
+	Asn1IntegerRecord::Asn1IntegerRecord(const std::string& value) : Asn1PrimitiveRecord(Asn1UniversalTagType::Integer)
+	{
+		m_Value = value;
+		m_ValueLength = m_Value.size();
 		m_TotalLength = m_ValueLength + 2;
 	}
 
@@ -624,61 +698,21 @@ namespace pcpp
 		}
 		default:
 		{
-			throw std::runtime_error("An integer ASN.1 record of more than 4 bytes is not supported");
+			m_Value = pcpp::byteArrayToHexString(data, m_ValueLength);
 		}
 		}
 	}
 
 	std::vector<uint8_t> Asn1IntegerRecord::encodeValue() const
 	{
-		std::vector<uint8_t> result;
-
-		result.resize(m_ValueLength);
-
-		switch (m_ValueLength)
-		{
-		case 1:
-		{
-			result[0] = static_cast<uint8_t>(m_Value);
-			break;
-		}
-		case 2:
-		{
-			auto hostValue = htobe16(static_cast<uint16_t>(m_Value));
-			result[0] = static_cast<uint8_t>(hostValue & 0xFF);
-			result[1] = static_cast<uint8_t>((hostValue >> 8) & 0xFF);
-			break;
-		}
-		case 3:
-		{
-			auto hostValue = htobe32(static_cast<uint32_t>(m_Value));
-			result[0] = static_cast<uint8_t>((hostValue >> 8) & 0xFF);
-			result[1] = static_cast<uint8_t>((hostValue >> 16) & 0xFF);
-			result[2] = static_cast<uint8_t>((hostValue >> 24) & 0xFF);
-			break;
-		}
-		case 4:
-		{
-			auto hostValue = htobe32(static_cast<uint32_t>(m_Value));
-			result[0] = static_cast<uint8_t>(hostValue & 0xFF);
-			result[1] = static_cast<uint8_t>((hostValue >> 8) & 0xFF);
-			result[2] = static_cast<uint8_t>((hostValue >> 16) & 0xFF);
-			result[3] = static_cast<uint8_t>((hostValue >> 24) & 0xFF);
-			break;
-		}
-		default:
-		{
-			throw std::runtime_error("Integer value of more than 4 bytes is not supported");
-		}
-		}
-
-		return result;
+		return m_Value.toBytes();
 	}
 
 	std::vector<std::string> Asn1IntegerRecord::toStringList()
 	{
+		auto valueAsString = m_Value.canFit<uint64_t>() ? std::to_string(getIntValue<uint64_t>()) : "0x" + getValueAsString();
 		return std::vector<std::string>(
-		    { Asn1Record::toStringList().front() + ", Value: " + std::to_string(getValue()) });
+		    { Asn1Record::toStringList().front() + ", Value: " + valueAsString });
 	}
 
 	Asn1EnumeratedRecord::Asn1EnumeratedRecord(uint32_t value) : Asn1IntegerRecord(value)
@@ -763,6 +797,119 @@ namespace pcpp
 	std::vector<std::string> Asn1BooleanRecord::toStringList()
 	{
 		return { Asn1Record::toStringList().front() + ", Value: " + (getValue() ? "true" : "false") };
+	}
+
+	static int daysInMonth(int year, int month)
+	{
+		static const int daysPerMonth[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+		if (month < 1 || month > 12) return 0;
+		if (month == 2 && year % 4 == 0) return 29;
+		return daysPerMonth[month - 1];
+	}
+
+	void Asn1UtcTimeRecord::decodeValue(uint8_t* data, bool lazy)
+	{
+		if ((m_ValueLength != 13 && m_ValueLength != 11) || (data[m_ValueLength - 1] != 'Z' && data[m_ValueLength - 1] != 'z'))
+		{
+			throw std::invalid_argument("Invalid ASN.1 UTC Time format (expected YYMMDDHHMM[SS]Z or Z)");
+		}
+
+		auto toInt = [](const unsigned char* ptr, size_t len) -> int
+		{
+			int value = 0;
+			for (size_t i = 0; i < len; ++i)
+			{
+				if (!std::isdigit(ptr[i]))
+				{
+					throw std::invalid_argument("Non-digit character found in time string");
+				}
+				value = value * 10 + (ptr[i] - '0');
+			}
+			return value;
+		};
+
+		int year = toInt(data, 2);
+		int month = toInt(data + 2, 2);
+		int day = toInt(data + 4, 2);
+		int hour = toInt(data + 6, 2);
+		int minute = toInt(data + 8, 2);
+		int second = 0; // default if not provided
+
+		m_WithSeconds = false;
+		if (m_ValueLength == 13)
+		{
+			second = toInt(data + 10, 2);
+			m_WithSeconds = true;
+		}
+
+		year += (year < 50) ? 2000 : 1900;
+
+		if (month < 1 || month > 12)
+		{
+			throw std::invalid_argument("Invalid month");
+		}
+
+		if (day < 1 || day > daysInMonth(year, month))
+		{
+			throw std::invalid_argument("Invalid day for given month/year");
+		}
+
+		if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59)
+		{
+			throw std::invalid_argument("Invalid time values");
+		}
+
+		std::tm tmUtc = {};
+		tmUtc.tm_year = year - 1900;
+		tmUtc.tm_mon  = month - 1;
+		tmUtc.tm_mday = day;
+		tmUtc.tm_hour = hour;
+		tmUtc.tm_min  = minute;
+		tmUtc.tm_sec  = second;
+
+		m_Value = tmUtc;
+	}
+
+	std::vector<uint8_t> Asn1UtcTimeRecord::encodeValue() const
+	{
+		int full_year = m_Value.tm_year + 1900;
+		if (full_year < 1950 || full_year > 2049)
+		{
+			throw std::invalid_argument("Year out of ASN.1 UTC Time range (1950–2049)");
+		}
+
+		int year2digit = (full_year >= 2000) ? full_year - 2000 : full_year - 1900;
+
+		std::ostringstream oss;
+		oss.fill('0');
+		oss << std::setw(2) << year2digit
+			<< std::setw(2) << m_Value.tm_mon + 1
+			<< std::setw(2) << m_Value.tm_mday
+			<< std::setw(2) << m_Value.tm_hour
+			<< std::setw(2) << m_Value.tm_min;
+
+		if (m_WithSeconds)
+		{
+			oss << std::setw(2) << m_Value.tm_sec;
+		}
+
+		oss << 'Z'; // Always use uppercase Z
+
+		std::string result = oss.str();
+		return {result.begin(), result.end()};
+	}
+
+	std::string Asn1UtcTimeRecord::getValueAsString(const std::string& format)
+	{
+		auto value = getValue();
+		std::ostringstream oss;
+		oss << std::put_time(&value, format.c_str());
+		return oss.str();
+	}
+
+	std::vector<std::string> Asn1UtcTimeRecord::toStringList()
+	{
+		return { Asn1Record::toStringList().front() + ", Value: " + getValueAsString()};
 	}
 
 	Asn1NullRecord::Asn1NullRecord() : Asn1PrimitiveRecord(Asn1UniversalTagType::Null)
