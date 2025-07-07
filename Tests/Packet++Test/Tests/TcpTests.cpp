@@ -71,11 +71,11 @@ PTF_TEST_CASE(TcpPacketWithAccurateEcnParsing)
 
 	READ_FILE_AND_CREATE_PACKET(1, "PacketExamples/TcpPacketNoOptionsAccEcn.dat");
 
-	pcpp::Packet tcpPacketNoOptions(&rawPacket1);
-	PTF_ASSERT_TRUE(tcpPacketNoOptions.isPacketOfType(pcpp::IPv4));
-	PTF_ASSERT_TRUE(tcpPacketNoOptions.isPacketOfType(pcpp::TCP));
+	pcpp::Packet TcpPacketWithAccurateEcn(&rawPacket1);
+	PTF_ASSERT_TRUE(TcpPacketWithAccurateEcn.isPacketOfType(pcpp::IPv4));
+	PTF_ASSERT_TRUE(TcpPacketWithAccurateEcn.isPacketOfType(pcpp::TCP));
 
-	pcpp::TcpLayer* tcpLayer = tcpPacketNoOptions.getLayerOfType<pcpp::TcpLayer>();
+	pcpp::TcpLayer* tcpLayer = TcpPacketWithAccurateEcn.getLayerOfType<pcpp::TcpLayer>();
 	PTF_ASSERT_NOT_NULL(tcpLayer);
 	
 	PTF_ASSERT_EQUAL(tcpLayer->getTcpHeader()->reserved, 0);
